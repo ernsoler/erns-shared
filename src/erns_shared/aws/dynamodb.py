@@ -1,7 +1,7 @@
 import contextlib
 from dataclasses import dataclass, field
 import boto3
-from boto3.dynamodb.conditions import Attr, ConditionBase, ConditionExpressionBuilder, Key as DynamoKey
+from boto3.dynamodb.conditions import ConditionBase, ConditionExpressionBuilder, Key as DynamoKey
 from boto3.dynamodb.types import TypeSerializer
 from typing import Any, Dict, Iterator, List, Literal, Optional
 

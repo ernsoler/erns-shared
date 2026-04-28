@@ -6,7 +6,6 @@ from erns_shared.ddd.base_types import (
     DomainEvent,
     EntityId,
     EpochTime,
-    Inmutable,
     NamedEnum,
     RootEntity,
     UUIDGenerator,

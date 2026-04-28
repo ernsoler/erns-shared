@@ -2,7 +2,7 @@ from typing import Protocol, Dict, Any, TypeVar, Optional, Iterator
 import erns_shared.ddd.base_types as base_types
 
 E = TypeVar("E", bound=base_types.RepositoryAggregate)
-I = TypeVar("I", bound=base_types.EntityId)
+Id = TypeVar("Id", bound=base_types.EntityId)
 
 
 class WriteOperation(Protocol):
@@ -46,10 +46,10 @@ class Repository(Protocol[E]):
     def update(self, item: E) -> None:
         ...
 
-    def get_by_id(self, id: I) -> E:
+    def get_by_id(self, id: Id) -> E:
         ...
 
-    def find_by_id(self, id: I) -> Optional[E]:
+    def find_by_id(self, id: Id) -> Optional[E]:
         ...
 
     def get_all(self) -> Iterator[E]:
