@@ -205,3 +205,5 @@ def handler(event: dict, context: LambdaContext) -> dict:
 - `aws-lambda-powertools >= 2.0`
 
 ## Contributing
+
+See [GUIDE.md](GUIDE.md) for setup instructions, project structure, conventions, and the release workflow.

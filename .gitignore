@@ -22,5 +22,8 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Lock file (library — consumers pin their own)
+uv.lock
+
 # macOS
 **/.DS_Store
