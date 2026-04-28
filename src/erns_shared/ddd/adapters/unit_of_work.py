@@ -13,8 +13,7 @@ from erns_shared.ddd.adapters.persistence.commons import WriteOperation
 _LOGGER = lambda_logger.get_lambda_logger()
 
 
-class UnknownTransactionTypeError(Exception):
-    ...
+class UnknownTransactionTypeError(Exception): ...
 
 
 class DuplicateWriteOperationsError(Exception):
@@ -29,8 +28,7 @@ class DynamoBatchSizePerTrxExceedsError(Exception):
         super().__init__("DynamoDB only allows 100 operations in a single transaction")
 
 
-class TransactionFailedError(Exception):
-    ...
+class TransactionFailedError(Exception): ...
 
 
 class TransactionType(base_types.NamedEnum):
@@ -44,25 +42,19 @@ MAX_DYNAMO_DB_BATCH_SIZE_PER_TRX: Final = 100
 
 class UnitOfWork(Protocol):
     @property
-    def session(self) -> persistence_commons.SessionDB:
-        ...
+    def session(self) -> persistence_commons.SessionDB: ...
 
     @contextlib.contextmanager
-    def transaction(self) -> Iterator[None]:
-        ...
+    def transaction(self) -> Iterator[None]: ...
 
     @contextlib.contextmanager
-    def batch(self) -> Iterator[None]:
-        ...
+    def batch(self) -> Iterator[None]: ...
 
-    def commit(self) -> None:
-        ...
+    def commit(self) -> None: ...
 
-    def rollback(self) -> None:
-        ...
+    def rollback(self) -> None: ...
 
-    def publish_events(self, events: List[base_types.DomainEvent]) -> None:
-        ...
+    def publish_events(self, events: List[base_types.DomainEvent]) -> None: ...
 
 
 class DefaultDynamoDBSession:
@@ -89,7 +81,8 @@ class DefaultDynamoDBSession:
             if error_code == "TransactionCanceledException":
                 raise TransactionFailedError(
                     ".".join(
-                        reason["Message"] for reason in e.response["CancellationReasons"]
+                        reason["Message"]
+                        for reason in e.response["CancellationReasons"]
                     )
                 )
             raise TransactionFailedError(error_code) from e

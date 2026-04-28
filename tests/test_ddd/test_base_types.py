@@ -203,8 +203,7 @@ class TestSplitList:
         assert list(split_list([1, 2, 3, 4], chunk_size=2)) == [[1, 2], [3, 4]]
 
     def test_uneven_split(self):
-        assert list(split_list([1, 2, 3, 4, 5], chunk_size=2)) == [
-            [1, 2], [3, 4], [5]]
+        assert list(split_list([1, 2, 3, 4, 5], chunk_size=2)) == [[1, 2], [3, 4], [5]]
 
     def test_empty_list(self):
         assert list(split_list([], chunk_size=3)) == []

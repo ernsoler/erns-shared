@@ -9,20 +9,30 @@ from erns_shared.aws.ssm import SSMClient
 def ssm(aws_credentials):
     with mock_aws():
         client = boto3.client("ssm", region_name="us-east-1")
-        client.put_parameter(Name="/app/db_url", Value="postgres://localhost/db", Type="String")
-        client.put_parameter(Name="/app/secret_key", Value="s3cr3t", Type="SecureString")
-        client.put_parameter(Name="/app/nested/value", Value="nested-val", Type="String")
+        client.put_parameter(
+            Name="/app/db_url", Value="postgres://localhost/db", Type="String"
+        )
+        client.put_parameter(
+            Name="/app/secret_key", Value="s3cr3t", Type="SecureString"
+        )
+        client.put_parameter(
+            Name="/app/nested/value", Value="nested-val", Type="String"
+        )
         yield SSMClient()
 
 
 class TestGetParameter:
     def test_returns_value(self, ssm):
-        assert ssm.get_parameter("/app/db_url", decrypt=False) == "postgres://localhost/db"
+        assert (
+            ssm.get_parameter("/app/db_url", decrypt=False) == "postgres://localhost/db"
+        )
 
     def test_cache_hit_skips_api(self, ssm):
         ssm.get_parameter("/app/db_url", decrypt=False)
         ssm._client = None  # break the client — cache must serve the value
-        assert ssm.get_parameter("/app/db_url", decrypt=False) == "postgres://localhost/db"
+        assert (
+            ssm.get_parameter("/app/db_url", decrypt=False) == "postgres://localhost/db"
+        )
 
     def test_bypass_cache_goes_to_api(self, ssm):
         ssm.get_parameter("/app/db_url", decrypt=False, use_cache=True)
@@ -51,7 +61,9 @@ class TestGetParametersByPath:
     def test_cached_after_path_fetch(self, ssm):
         ssm.get_parameters_by_path("/app", decrypt=False)
         ssm._client = None  # break client — cache must serve subsequent gets
-        assert ssm.get_parameter("/app/db_url", decrypt=False) == "postgres://localhost/db"
+        assert (
+            ssm.get_parameter("/app/db_url", decrypt=False) == "postgres://localhost/db"
+        )
 
 
 class TestPutParameter:
@@ -61,7 +73,9 @@ class TestPutParameter:
 
     def test_put_clears_stale_cache_entry(self, ssm):
         ssm.get_parameter("/app/db_url", decrypt=False)
-        ssm.put_parameter("/app/db_url", "updated_url", param_type="String", overwrite=True)
+        ssm.put_parameter(
+            "/app/db_url", "updated_url", param_type="String", overwrite=True
+        )
         assert "/app/db_url" not in ssm._cache
 
     def test_put_with_overwrite(self, ssm):

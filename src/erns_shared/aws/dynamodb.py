@@ -1,7 +1,11 @@
 import contextlib
 from dataclasses import dataclass, field
 import boto3
-from boto3.dynamodb.conditions import ConditionBase, ConditionExpressionBuilder, Key as DynamoKey
+from boto3.dynamodb.conditions import (
+    ConditionBase,
+    ConditionExpressionBuilder,
+    Key as DynamoKey,
+)
 from boto3.dynamodb.types import TypeSerializer
 from typing import Any, Dict, Iterator, List, Literal, Optional
 
@@ -140,7 +144,9 @@ class DynamoDBTable:
         return self._writer("transaction")
 
     @contextlib.contextmanager
-    def _writer(self, mode: Literal["batch", "transaction"]) -> Iterator["_WriteContext"]:
+    def _writer(
+        self, mode: Literal["batch", "transaction"]
+    ) -> Iterator["_WriteContext"]:
         ctx = _WriteContext(table_name=self._table_name, mode=mode)
         try:
             yield ctx
@@ -171,14 +177,18 @@ class _WriteContext:
         self._mode = mode
         self._ops: List[_Op] = []
 
-    def put(self, item: Dict[str, Any], condition: Optional[ConditionBase] = None) -> None:
+    def put(
+        self, item: Dict[str, Any], condition: Optional[ConditionBase] = None
+    ) -> None:
         if condition is not None and self._mode == "batch":
             raise ValueError(
                 "ConditionExpression is not supported in batch mode — use transaction_writer()"
             )
         self._ops.append(_Op(kind="put", data=item, condition=condition))
 
-    def delete(self, key: Dict[str, Any], condition: Optional[ConditionBase] = None) -> None:
+    def delete(
+        self, key: Dict[str, Any], condition: Optional[ConditionBase] = None
+    ) -> None:
         if condition is not None and self._mode == "batch":
             raise ValueError(
                 "ConditionExpression is not supported in batch mode — use transaction_writer()"
@@ -197,12 +207,12 @@ class _WriteContext:
         resource = boto3.resource("dynamodb")
         for chunk in split_list(self._ops, _BATCH_WRITE_LIMIT):
             requests = [
-                {"PutRequest": {"Item": op.data}} if op.kind == "put"
+                {"PutRequest": {"Item": op.data}}
+                if op.kind == "put"
                 else {"DeleteRequest": {"Key": op.data}}
                 for op in chunk
             ]
-            resource.batch_write_item(
-                RequestItems={self._table_name: requests})
+            resource.batch_write_item(RequestItems={self._table_name: requests})
 
     def _flush_transaction(self) -> None:
         if len(self._ops) > _TRANSACTION_LIMIT:
@@ -213,31 +223,24 @@ class _WriteContext:
         serializer = TypeSerializer()
         transact_items = []
         for op in self._ops:
-            serialized = {k: serializer.serialize(
-                v) for k, v in op.data.items()}
+            serialized = {k: serializer.serialize(v) for k, v in op.data.items()}
             entry: Dict[str, Any]
             if op.kind == "put":
-                entry = {
-                    "Put": {"TableName": self._table_name, "Item": serialized}}
+                entry = {"Put": {"TableName": self._table_name, "Item": serialized}}
             else:
-                entry = {"Delete": {
-                    "TableName": self._table_name, "Key": serialized}}
+                entry = {"Delete": {"TableName": self._table_name, "Key": serialized}}
             if op.condition is not None:
-                entry[op.kind.capitalize()].update(
-                    _serialize_condition(op.condition))
+                entry[op.kind.capitalize()].update(_serialize_condition(op.condition))
             transact_items.append(entry)
-        boto3.client("dynamodb").transact_write_items(
-            TransactItems=transact_items)
+        boto3.client("dynamodb").transact_write_items(TransactItems=transact_items)
 
 
 def _serialize_condition(condition: ConditionBase) -> Dict[str, Any]:
     """Translate a boto3 ConditionBase into the dict shape expected by the low-level client."""
     built = ConditionExpressionBuilder().build_expression(condition)
-    result: Dict[str, Any] = {
-        "ConditionExpression": built.condition_expression}
+    result: Dict[str, Any] = {"ConditionExpression": built.condition_expression}
     if built.attribute_name_placeholders:
-        result["ExpressionAttributeNames"] = dict(
-            built.attribute_name_placeholders)
+        result["ExpressionAttributeNames"] = dict(built.attribute_name_placeholders)
     if built.attribute_value_placeholders:
         serializer = TypeSerializer()
         result["ExpressionAttributeValues"] = {

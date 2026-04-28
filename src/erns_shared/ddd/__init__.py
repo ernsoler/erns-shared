@@ -16,6 +16,7 @@ from erns_shared.ddd.base_types import (
     split_list,
     update_last_update_date,
 )
+
 __all__ = [
     "NamedEnum",
     "UUIDGenerator",

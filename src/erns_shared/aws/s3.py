@@ -14,7 +14,9 @@ class S3Client:
         body: bytes,
         content_type: str = "application/octet-stream",
     ) -> None:
-        self._client.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+        self._client.put_object(
+            Bucket=bucket, Key=key, Body=body, ContentType=content_type
+        )
 
     def download(self, bucket: str, key: str) -> bytes:
         response = self._client.get_object(Bucket=bucket, Key=key)

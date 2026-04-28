@@ -10,13 +10,11 @@ _LOGGER = logging.getLogger("event_publisher")
 E = TypeVar("E", bound=base_types.DomainEvent)
 
 
-class EventPublishError(Exception):
-    ...
+class EventPublishError(Exception): ...
 
 
 class EventPublisher(Protocol):
-    def publish(self, events: List[E]) -> None:
-        ...
+    def publish(self, events: List[E]) -> None: ...
 
 
 class _CommonSettings(base_types.Settings):

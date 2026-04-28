@@ -40,6 +40,8 @@ class TestBuildPowertools:
     def test_explicit_args_override_env_vars(self, monkeypatch):
         monkeypatch.setenv("POWERTOOLS_SERVICE_NAME", "env-service")
         monkeypatch.setenv("POWERTOOLS_METRICS_NAMESPACE", "env-ns")
-        logger, _, metrics = build_powertools(service="explicit-svc", namespace="explicit-ns")
+        logger, _, metrics = build_powertools(
+            service="explicit-svc", namespace="explicit-ns"
+        )
         assert logger.service == "explicit-svc"
         assert metrics.namespace == "explicit-ns"

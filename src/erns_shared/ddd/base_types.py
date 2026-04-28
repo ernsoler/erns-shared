@@ -29,8 +29,7 @@ class Inmutable(pydantic.BaseModel):
     )
 
 
-class ValueObject(Inmutable):
-    ...
+class ValueObject(Inmutable): ...
 
 
 class EpochTime(Inmutable):
@@ -78,8 +77,7 @@ class Key(Inmutable):
         return "#".join(values(attrs_dict=attrs_dict))
 
 
-class EntityId(Key):
-    ...
+class EntityId(Key): ...
 
 
 class Entity(pydantic.BaseModel):
@@ -120,16 +118,13 @@ class DomainAggregate(RootEntity):
         return events
 
 
-class RepositoryAggregate(RootEntity):
-    ...
+class RepositoryAggregate(RootEntity): ...
 
 
-class Projection(DomainAggregate):
-    ...
+class Projection(DomainAggregate): ...
 
 
-class Command(Inmutable):
-    ...
+class Command(Inmutable): ...
 
 
 class DomainEvent(Inmutable):
@@ -142,4 +137,4 @@ def split_list(input_list: List[Any], chunk_size: int) -> Iterator[List[Any]]:
     if chunk_size <= 0:
         raise ValueError("Chunk size must be bigger than zero")
     for i in range(0, len(input_list), chunk_size):
-        yield input_list[i: i + chunk_size]
+        yield input_list[i : i + chunk_size]

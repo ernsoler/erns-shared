@@ -28,9 +28,15 @@ def table(aws_credentials):
         )
         ddb = DynamoDBTable(_TABLE)
         ddb.put_item({"pk": "user#1", "sk": "profile", "name": "Alice", "active": True})
-        ddb.put_item({"pk": "user#1", "sk": "order#001", "total": 99, "status": "shipped"})
-        ddb.put_item({"pk": "user#1", "sk": "order#002", "total": 42, "status": "pending"})
-        ddb.put_item({"pk": "user#1", "sk": "order#003", "total": 75, "status": "shipped"})
+        ddb.put_item(
+            {"pk": "user#1", "sk": "order#001", "total": 99, "status": "shipped"}
+        )
+        ddb.put_item(
+            {"pk": "user#1", "sk": "order#002", "total": 42, "status": "pending"}
+        )
+        ddb.put_item(
+            {"pk": "user#1", "sk": "order#003", "total": 75, "status": "shipped"}
+        )
         ddb.put_item({"pk": "user#2", "sk": "profile", "name": "Bob", "active": False})
         yield ddb
 
@@ -45,17 +51,25 @@ class TestQueryByPkSkCondition:
         assert len(list(table.query_by_pk(pk_name=_PK, pk_value="user#1"))) == 4
 
     def test_sk_eq(self, table):
-        items = list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("profile")))
+        items = list(
+            table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("profile"))
+        )
         assert len(items) == 1
         assert items[0]["name"] == "Alice"
 
     def test_sk_begins_with(self, table):
-        items = list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).begins_with("order#")))
+        items = list(
+            table.query_by_pk(
+                _PK, "user#1", sk_condition=Key(_SK).begins_with("order#")
+            )
+        )
         assert len(items) == 3
 
     def test_sk_between(self, table):
         items = list(
-            table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).between("order#001", "order#002"))
+            table.query_by_pk(
+                _PK, "user#1", sk_condition=Key(_SK).between("order#001", "order#002")
+            )
         )
         assert len(items) == 2
         assert {i["sk"] for i in items} == {"order#001", "order#002"}
@@ -74,7 +88,12 @@ class TestQueryByPkSkCondition:
 
     def test_scan_index_forward_false_reverses_order(self, table):
         items = list(
-            table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).begins_with("order#"), scan_index_forward=False)
+            table.query_by_pk(
+                _PK,
+                "user#1",
+                sk_condition=Key(_SK).begins_with("order#"),
+                scan_index_forward=False,
+            )
         )
         sks = [i["sk"] for i in items]
         assert sks == sorted(sks, reverse=True)
@@ -96,7 +115,10 @@ class TestQueryByPkSkPrefix:
     def test_filter_expression_stacks(self, table):
         items = list(
             table.query_by_pk_sk_prefix(
-                _PK, "user#1", _SK, "order#",
+                _PK,
+                "user#1",
+                _SK,
+                "order#",
                 filter_expression=Attr("status").eq("pending"),
             )
         )
@@ -127,7 +149,9 @@ class TestScan:
 
     def test_compound_filter(self, table):
         items = list(
-            table.scan(filter_expression=Attr("status").eq("shipped") & Attr("total").gte(80))
+            table.scan(
+                filter_expression=Attr("status").eq("shipped") & Attr("total").gte(80)
+            )
         )
         assert len(items) == 1
         assert items[0]["total"] == 99
@@ -151,14 +175,19 @@ class TestPutItem:
         assert old["name"] == "Alice"
 
     def test_return_all_old_with_no_previous_item_is_none(self, table):
-        assert table.put_item({"pk": "brand#new", "sk": "x"}, return_values="ALL_OLD") is None
+        assert (
+            table.put_item({"pk": "brand#new", "sk": "x"}, return_values="ALL_OLD")
+            is None
+        )
 
     def test_condition_passes_and_writes(self, table):
         table.put_item(
             {"pk": "user#1", "sk": "profile", "name": "Alice v2"},
             condition=Attr("name").eq("Alice"),
         )
-        items = list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("profile")))
+        items = list(
+            table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("profile"))
+        )
         assert items[0]["name"] == "Alice v2"
 
     def test_condition_fails_raises(self, table):
@@ -184,14 +213,24 @@ class TestPutItem:
 class TestDeleteItem:
     def test_simple_delete(self, table):
         table.delete_item({"pk": "user#1", "sk": "order#001"})
-        assert list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))) == []
+        assert (
+            list(
+                table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))
+            )
+            == []
+        )
 
     def test_condition_passes(self, table):
         table.delete_item(
             {"pk": "user#1", "sk": "order#001"},
             condition=Attr("status").eq("shipped"),
         )
-        assert list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))) == []
+        assert (
+            list(
+                table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))
+            )
+            == []
+        )
 
     def test_condition_fails_raises(self, table):
         with pytest.raises(ClientError, match="ConditionalCheckFailedException"):
@@ -245,7 +284,12 @@ class TestBatchWriter:
             w.delete({"pk": "user#1", "sk": "order#001"})
 
         assert list(table.query_by_pk(_PK, "user#7"))[0]["name"] == "Grace"
-        assert list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))) == []
+        assert (
+            list(
+                table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))
+            )
+            == []
+        )
 
     def test_condition_raises_immediately(self, table):
         with pytest.raises(ValueError, match="batch mode"):
@@ -287,7 +331,12 @@ class TestTransactionWriter:
             w.delete({"pk": "user#1", "sk": "order#003"})
 
         assert list(table.query_by_pk(_PK, "user#8"))[0]["name"] == "Heidi"
-        assert list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#003"))) == []
+        assert (
+            list(
+                table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#003"))
+            )
+            == []
+        )
 
     def test_condition_on_put(self, table):
         with table.transaction_writer() as w:
@@ -295,7 +344,12 @@ class TestTransactionWriter:
                 {"pk": "user#1", "sk": "profile", "name": "Alice v2"},
                 condition=Attr("name").eq("Alice"),
             )
-        assert list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("profile")))[0]["name"] == "Alice v2"
+        assert (
+            list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("profile")))[
+                0
+            ]["name"]
+            == "Alice v2"
+        )
 
     def test_condition_on_delete(self, table):
         with table.transaction_writer() as w:
@@ -303,7 +357,12 @@ class TestTransactionWriter:
                 {"pk": "user#1", "sk": "order#001"},
                 condition=Attr("status").eq("shipped"),
             )
-        assert list(table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))) == []
+        assert (
+            list(
+                table.query_by_pk(_PK, "user#1", sk_condition=Key(_SK).eq("order#001"))
+            )
+            == []
+        )
 
     def test_exceeding_100_ops_raises_before_flush(self, table):
         with pytest.raises(ValueError, match="100"):

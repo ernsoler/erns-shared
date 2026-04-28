@@ -9,7 +9,9 @@ class SSMClient:
         self._client = boto3.client("ssm")
         self._cache: Dict[str, str] = {}
 
-    def get_parameter(self, name: str, decrypt: bool = True, use_cache: bool = True) -> str:
+    def get_parameter(
+        self, name: str, decrypt: bool = True, use_cache: bool = True
+    ) -> str:
         if use_cache and name in self._cache:
             return self._cache[name]
         response = self._client.get_parameter(Name=name, WithDecryption=decrypt)
@@ -23,7 +25,9 @@ class SSMClient:
     ) -> Dict[str, str]:
         result: Dict[str, str] = {}
         paginator = self._client.get_paginator("get_parameters_by_path")
-        for page in paginator.paginate(Path=path, WithDecryption=decrypt, Recursive=True):
+        for page in paginator.paginate(
+            Path=path, WithDecryption=decrypt, Recursive=True
+        ):
             for param in page.get("Parameters", []):
                 name: str = param["Name"]
                 value: str = param["Value"]

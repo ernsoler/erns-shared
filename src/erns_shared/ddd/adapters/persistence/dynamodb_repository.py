@@ -36,12 +36,16 @@ class DynamoDbRepository(commons.Repository[E]):
 
     def put(self, item: E) -> None:
         self._session.add_write_operation(
-            operation=self._build_write_operation(item=item, operation_type=_DynamoDbPutOperation)
+            operation=self._build_write_operation(
+                item=item, operation_type=_DynamoDbPutOperation
+            )
         )
 
     def update(self, item: E) -> None:
         self._session.add_write_operation(
-            operation=self._build_write_operation(item=item, operation_type=_DynamoDbUpdateOperation)
+            operation=self._build_write_operation(
+                item=item, operation_type=_DynamoDbUpdateOperation
+            )
         )
 
     def _build_write_operation(
@@ -64,7 +68,9 @@ class DynamoDbRepository(commons.Repository[E]):
             TableName=self._table_name, Key={self._key_name: {"S": id._key()}}
         ).get("Item")
         if item:
-            return self._entity_type.model_validate(self._deserialize_item(dynamodb_record=item))
+            return self._entity_type.model_validate(
+                self._deserialize_item(dynamodb_record=item)
+            )
         raise ValueError("Requested item not found")
 
     def find_by_id(self, id: I) -> Optional[E]:
@@ -81,7 +87,9 @@ class DynamoDbRepository(commons.Repository[E]):
         while True:
             response = self._session.client.scan(**params)
             for item in response.get("Items", []):
-                yield self._entity_type.model_validate(self._deserialize_item(dynamodb_record=item))
+                yield self._entity_type.model_validate(
+                    self._deserialize_item(dynamodb_record=item)
+                )
 
             if "LastEvaluatedKey" in response:
                 params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
@@ -90,7 +98,9 @@ class DynamoDbRepository(commons.Repository[E]):
 
 
 class _DynamoDbWriteOperation:
-    def __init__(self, table_name: str, key_name: str, entity_dict: Dict[str, Any]) -> None:
+    def __init__(
+        self, table_name: str, key_name: str, entity_dict: Dict[str, Any]
+    ) -> None:
         self._table_name = table_name
         self._key_name = key_name
         self._id = entity_dict.get(key_name)
