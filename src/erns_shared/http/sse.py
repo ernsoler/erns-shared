@@ -85,7 +85,7 @@ def sse_stream(source: AsyncGenerator[SSEEvent, None]) -> StreamingResponse:
         _generate(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",       # prevent proxies from buffering the stream
-            "X-Accel-Buffering": "no",          # disable nginx response buffering
+            "Cache-Control": "no-cache",  # prevent proxies from buffering the stream
+            "X-Accel-Buffering": "no",  # disable nginx response buffering
         },
     )

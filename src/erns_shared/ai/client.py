@@ -16,6 +16,7 @@ Usage:
     response = client.complete(system="...", user="...", max_tokens=4096)
     print(response.text, response.input_tokens, response.output_tokens)
 """
+
 from __future__ import annotations
 
 import os
@@ -32,37 +33,39 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 MODEL_COSTS: dict[str, dict[str, float]] = {
     # Anthropic
-    "claude-haiku-4-5-20251001": {"input": 0.80,  "output": 4.00},
-    "claude-sonnet-4-6":         {"input": 3.00,  "output": 15.00},
-    "claude-opus-4-7":           {"input": 15.00, "output": 75.00},
+    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-opus-4-7": {"input": 15.00, "output": 75.00},
     # OpenAI
-    "gpt-4o":                    {"input": 2.50,  "output": 10.00},
-    "gpt-4o-mini":               {"input": 0.15,  "output": 0.60},
-    "gpt-4-turbo":               {"input": 10.00, "output": 30.00},
-    "o1":                        {"input": 15.00, "output": 60.00},
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4-turbo": {"input": 10.00, "output": 30.00},
+    "o1": {"input": 15.00, "output": 60.00},
     # Google
-    "gemini-1.5-pro":            {"input": 1.25,  "output": 5.00},
-    "gemini-1.5-flash":          {"input": 0.075, "output": 0.30},
-    "gemini-2.0-flash":          {"input": 0.10,  "output": 0.40},
+    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
     # Ollama — local, treat as free
-    "llama3":                    {"input": 0.00,  "output": 0.00},
-    "mistral":                   {"input": 0.00,  "output": 0.00},
-    "llama3.1:8b":               {"input": 0.00,  "output": 0.00},
-    "llama3.3:70b":              {"input": 0.00,  "output": 0.00},
-    "phi3":                      {"input": 0.00,  "output": 0.00},
+    "llama3": {"input": 0.00, "output": 0.00},
+    "mistral": {"input": 0.00, "output": 0.00},
+    "llama3.1:8b": {"input": 0.00, "output": 0.00},
+    "llama3.3:70b": {"input": 0.00, "output": 0.00},
+    "phi3": {"input": 0.00, "output": 0.00},
 }
 
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Return estimated USD cost for a completion call."""
     costs = MODEL_COSTS.get(model, {"input": 0.0, "output": 0.0})
-    return (input_tokens / 1_000_000 * costs["input"]) + \
-           (output_tokens / 1_000_000 * costs["output"])
+    return (input_tokens / 1_000_000 * costs["input"]) + (
+        output_tokens / 1_000_000 * costs["output"]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Response dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class AIResponse:
@@ -81,6 +84,7 @@ class AIResponse:
 # Provider error — wraps all SDK errors into a single provider-agnostic type
 # ---------------------------------------------------------------------------
 
+
 class ProviderError(Exception):
     """Raised by AIClient.complete() for any provider-side failure.
 
@@ -90,7 +94,9 @@ class ProviderError(Exception):
         public_message: Safe message to return to the end user (no internal detail).
     """
 
-    def __init__(self, public_message: str, status_code: int = 503, retryable: bool = False) -> None:
+    def __init__(
+        self, public_message: str, status_code: int = 503, retryable: bool = False
+    ) -> None:
         super().__init__(public_message)
         self.status_code = status_code
         self.retryable = retryable
@@ -100,6 +106,7 @@ class ProviderError(Exception):
 # ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
+
 
 class AIClient(ABC):
     """All concrete clients implement this single interface."""
@@ -124,6 +131,7 @@ class AIClient(ABC):
 # ---------------------------------------------------------------------------
 # Anthropic  (Claude)
 # ---------------------------------------------------------------------------
+
 
 class AnthropicClient(AIClient):
     """Wraps the official anthropic SDK."""
@@ -156,14 +164,20 @@ class AnthropicClient(AIClient):
                 response = stream.get_final_message()
         except self._anthropic.AuthenticationError as e:
             logger.error("Anthropic auth error: %s", e)
-            raise ProviderError("AI service configuration error.", status_code=503) from e
+            raise ProviderError(
+                "AI service configuration error.", status_code=503
+            ) from e
         except self._anthropic.PermissionDeniedError as e:
             logger.error("Anthropic permission error: %s", e)
-            raise ProviderError("AI service configuration error.", status_code=503) from e
+            raise ProviderError(
+                "AI service configuration error.", status_code=503
+            ) from e
         except self._anthropic.RateLimitError as e:
             logger.warning("Anthropic rate limit: %s", e)
             raise ProviderError(
-                "AI service is busy. Please try again shortly.", status_code=429, retryable=True
+                "AI service is busy. Please try again shortly.",
+                status_code=429,
+                retryable=True,
             ) from e
         except self._anthropic.APITimeoutError as e:
             logger.warning("Anthropic timeout: %s", e)
@@ -172,7 +186,9 @@ class AnthropicClient(AIClient):
             ) from e
         except self._anthropic.BadRequestError as e:
             logger.error("Anthropic bad request: %s", e)
-            raise ProviderError("AI service is temporarily unavailable.", status_code=503) from e
+            raise ProviderError(
+                "AI service is temporarily unavailable.", status_code=503
+            ) from e
         except self._anthropic.APIStatusError as e:
             # overloaded_error can arrive in the stream body after an HTTP 200
             error_type = ""
@@ -182,30 +198,39 @@ class AnthropicClient(AIClient):
                 logger.warning("Anthropic overloaded (status=%s): %s", e.status_code, e)
                 raise ProviderError(
                     "AI service is busy. Please try again shortly.",
-                    status_code=503, retryable=True,
+                    status_code=503,
+                    retryable=True,
                 ) from e
             logger.error("Anthropic API error status=%s: %s", e.status_code, e)
             raise ProviderError(
-                "AI service is temporarily unavailable.", status_code=503, retryable=True
+                "AI service is temporarily unavailable.",
+                status_code=503,
+                retryable=True,
             ) from e
 
         text = response.content[0].text if response.content else ""
         logger.info(
             "Anthropic response stop_reason=%s output_tokens=%d text_len=%d",
-            response.stop_reason, response.usage.output_tokens, len(text),
+            response.stop_reason,
+            response.usage.output_tokens,
+            len(text),
         )
         if response.stop_reason == "max_tokens":
             logger.error(
                 "Anthropic hit max_tokens limit model=%s output_tokens=%d — response truncated",
-                self.model, response.usage.output_tokens,
+                self.model,
+                response.usage.output_tokens,
             )
             raise ProviderError(
                 "The document is too large to analyse. Please try a shorter document.",
-                status_code=422, retryable=False,
+                status_code=422,
+                retryable=False,
             )
         if not text.strip():
             raise ProviderError(
-                "Analysis service unavailable. Please try again.", status_code=503, retryable=True
+                "Analysis service unavailable. Please try again.",
+                status_code=503,
+                retryable=True,
             )
         return AIResponse(
             text=text,
@@ -220,6 +245,7 @@ class AnthropicClient(AIClient):
 # OpenAI  (GPT-4o, etc.)
 # ---------------------------------------------------------------------------
 
+
 class OpenAIClient(AIClient):
     """Wraps the official openai SDK (v1+)."""
 
@@ -228,13 +254,24 @@ class OpenAIClient(AIClient):
     def __init__(self, model: str, api_key: str) -> None:
         super().__init__(model)
         try:
-            from openai import OpenAI, AuthenticationError, RateLimitError, APITimeoutError, APIStatusError  # noqa: PLC0415
+            from openai import (
+                OpenAI,
+                AuthenticationError,
+                RateLimitError,
+                APITimeoutError,
+                APIStatusError,
+            )  # noqa: PLC0415
         except ImportError as exc:
             raise ImportError(
                 "openai package is not installed. Run: pip install openai"
             ) from exc
         self._client = OpenAI(api_key=api_key)
-        self._errors = (AuthenticationError, RateLimitError, APITimeoutError, APIStatusError)
+        self._errors = (
+            AuthenticationError,
+            RateLimitError,
+            APITimeoutError,
+            APIStatusError,
+        )
 
     def complete(self, system: str, user: str, max_tokens: int = 4096) -> AIResponse:
         try:
@@ -243,21 +280,23 @@ class OpenAIClient(AIClient):
                 max_tokens=max_tokens,
                 messages=[
                     {"role": "system", "content": system},
-                    {"role": "user",   "content": user},
+                    {"role": "user", "content": user},
                 ],
             )
         except Exception as e:
             logger.error("OpenAI error: %s", e)
             raise ProviderError(
                 "AI service is temporarily unavailable. Please try again.",
-                status_code=503, retryable=True,
+                status_code=503,
+                retryable=True,
             ) from e
 
         text = response.choices[0].message.content or ""
         if not text.strip():
             raise ProviderError(
                 "AI service returned an empty response. Please try again.",
-                status_code=503, retryable=True,
+                status_code=503,
+                retryable=True,
             )
         usage = response.usage
         return AIResponse(
@@ -272,6 +311,7 @@ class OpenAIClient(AIClient):
 # ---------------------------------------------------------------------------
 # Google  (Gemini)
 # ---------------------------------------------------------------------------
+
 
 class GeminiClient(AIClient):
     """Wraps the google-generativeai SDK."""
@@ -294,21 +334,25 @@ class GeminiClient(AIClient):
             model_instance = self._genai.GenerativeModel(
                 model_name=self.model,
                 system_instruction=system,
-                generation_config=self._genai.GenerationConfig(max_output_tokens=max_tokens),
+                generation_config=self._genai.GenerationConfig(
+                    max_output_tokens=max_tokens
+                ),
             )
             response = model_instance.generate_content(user)
         except Exception as e:
             logger.error("Gemini error: %s", e)
             raise ProviderError(
                 "AI service is temporarily unavailable. Please try again.",
-                status_code=503, retryable=True,
+                status_code=503,
+                retryable=True,
             ) from e
 
         text = response.text or ""
         if not text.strip():
             raise ProviderError(
                 "AI service returned an empty response. Please try again.",
-                status_code=503, retryable=True,
+                status_code=503,
+                retryable=True,
             )
         input_tokens = 0
         output_tokens = 0
@@ -329,6 +373,7 @@ class GeminiClient(AIClient):
 # ---------------------------------------------------------------------------
 # Ollama  (local HTTP API)
 # ---------------------------------------------------------------------------
+
 
 class OllamaClient(AIClient):
     """Calls a locally-running Ollama instance via its HTTP API.
@@ -357,7 +402,7 @@ class OllamaClient(AIClient):
             "options": {"num_predict": max_tokens},
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user",   "content": user},
+                {"role": "user", "content": user},
             ],
         }
         try:
@@ -367,7 +412,8 @@ class OllamaClient(AIClient):
             logger.error("Ollama error: %s", e)
             raise ProviderError(
                 "Local AI service is unavailable. Make sure Ollama is running.",
-                status_code=503, retryable=True,
+                status_code=503,
+                retryable=True,
             ) from e
 
         data = resp.json()
@@ -375,7 +421,8 @@ class OllamaClient(AIClient):
         if not text.strip():
             raise ProviderError(
                 "AI service returned an empty response. Please try again.",
-                status_code=503, retryable=True,
+                status_code=503,
+                retryable=True,
             )
         return AIResponse(
             text=text,
@@ -389,6 +436,7 @@ class OllamaClient(AIClient):
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 def get_ai_client(
     provider: str,
@@ -417,11 +465,17 @@ def get_ai_client(
     """
     provider = provider.lower().strip()
     if provider == "anthropic":
-        return AnthropicClient(model=model, api_key=api_key or os.environ.get("ANTHROPIC_API_KEY", ""))
+        return AnthropicClient(
+            model=model, api_key=api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        )
     if provider == "openai":
-        return OpenAIClient(model=model, api_key=api_key or os.environ.get("OPENAI_API_KEY", ""))
+        return OpenAIClient(
+            model=model, api_key=api_key or os.environ.get("OPENAI_API_KEY", "")
+        )
     if provider == "google":
-        return GeminiClient(model=model, api_key=api_key or os.environ.get("GOOGLE_API_KEY", ""))
+        return GeminiClient(
+            model=model, api_key=api_key or os.environ.get("GOOGLE_API_KEY", "")
+        )
     if provider == "ollama":
         base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         return OllamaClient(model=model, base_url=base_url)

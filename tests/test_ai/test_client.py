@@ -17,7 +17,10 @@ from erns_shared.ai.client import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_anthropic_stream(text="hello", input_tokens=100, output_tokens=50, stop_reason="end_turn"):
+
+def _make_anthropic_stream(
+    text="hello", input_tokens=100, output_tokens=50, stop_reason="end_turn"
+):
     response = MagicMock()
     response.content = [MagicMock(text=text)]
     response.usage.input_tokens = input_tokens
@@ -31,11 +34,26 @@ def _make_anthropic_stream(text="hello", input_tokens=100, output_tokens=50, sto
     return stream
 
 
-class _AnthropicAuthenticationError(Exception): pass
-class _AnthropicPermissionDeniedError(Exception): pass
-class _AnthropicRateLimitError(Exception): pass
-class _AnthropicAPITimeoutError(Exception): pass
-class _AnthropicBadRequestError(Exception): pass
+class _AnthropicAuthenticationError(Exception):
+    pass
+
+
+class _AnthropicPermissionDeniedError(Exception):
+    pass
+
+
+class _AnthropicRateLimitError(Exception):
+    pass
+
+
+class _AnthropicAPITimeoutError(Exception):
+    pass
+
+
+class _AnthropicBadRequestError(Exception):
+    pass
+
+
 class _AnthropicAPIStatusError(Exception):
     def __init__(self, msg, status_code=503, body=None):
         super().__init__(msg)
@@ -70,7 +88,9 @@ def _openai_client() -> OpenAIClient:
 
 def _gemini_client() -> GeminiClient:
     mock_sdk = MagicMock()
-    with patch.dict(sys.modules, {"google.generativeai": mock_sdk, "google": MagicMock()}):
+    with patch.dict(
+        sys.modules, {"google.generativeai": mock_sdk, "google": MagicMock()}
+    ):
         client = GeminiClient(model="gemini-2.0-flash", api_key="test-key")
     client._genai = mock_sdk
     return client
@@ -88,9 +108,12 @@ def _ollama_client() -> OllamaClient:
 # estimate_cost
 # ---------------------------------------------------------------------------
 
+
 class TestEstimateCost:
     def test_known_model(self):
-        cost = estimate_cost("claude-sonnet-4-6", input_tokens=1_000_000, output_tokens=1_000_000)
+        cost = estimate_cost(
+            "claude-sonnet-4-6", input_tokens=1_000_000, output_tokens=1_000_000
+        )
         assert cost == pytest.approx(3.00 + 15.00)
 
     def test_unknown_model_returns_zero(self):
@@ -108,16 +131,26 @@ class TestEstimateCost:
 # AIResponse
 # ---------------------------------------------------------------------------
 
+
 class TestAIResponse:
     def test_estimated_cost_usd(self):
         r = AIResponse(
-            text="hi", input_tokens=1_000_000, output_tokens=1_000_000,
-            model="claude-sonnet-4-6", provider="anthropic",
+            text="hi",
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            model="claude-sonnet-4-6",
+            provider="anthropic",
         )
         assert r.estimated_cost_usd == pytest.approx(18.00)
 
     def test_free_model_cost_is_zero(self):
-        r = AIResponse(text="hi", input_tokens=999, output_tokens=999, model="llama3", provider="ollama")
+        r = AIResponse(
+            text="hi",
+            input_tokens=999,
+            output_tokens=999,
+            model="llama3",
+            provider="ollama",
+        )
         assert r.estimated_cost_usd == 0.0
 
 
@@ -125,10 +158,13 @@ class TestAIResponse:
 # AnthropicClient
 # ---------------------------------------------------------------------------
 
+
 class TestAnthropicClient:
     def test_successful_completion(self):
         client = _anthropic_client()
-        client._client.messages.stream.return_value = _make_anthropic_stream("hello world")
+        client._client.messages.stream.return_value = _make_anthropic_stream(
+            "hello world"
+        )
         result = client.complete(system="sys", user="hi")
         assert result.text == "hello world"
         assert result.input_tokens == 100
@@ -137,14 +173,18 @@ class TestAnthropicClient:
 
     def test_raises_provider_error_on_auth_failure(self):
         client = _anthropic_client()
-        client._client.messages.stream.side_effect = client._anthropic.AuthenticationError("bad key")
+        client._client.messages.stream.side_effect = (
+            client._anthropic.AuthenticationError("bad key")
+        )
         with pytest.raises(ProviderError) as exc:
             client.complete(system="sys", user="hi")
         assert exc.value.status_code == 503
 
     def test_raises_provider_error_on_rate_limit(self):
         client = _anthropic_client()
-        client._client.messages.stream.side_effect = client._anthropic.RateLimitError("rate limit")
+        client._client.messages.stream.side_effect = client._anthropic.RateLimitError(
+            "rate limit"
+        )
         with pytest.raises(ProviderError) as exc:
             client.complete(system="sys", user="hi")
         assert exc.value.status_code == 429
@@ -152,7 +192,9 @@ class TestAnthropicClient:
 
     def test_raises_provider_error_on_timeout(self):
         client = _anthropic_client()
-        client._client.messages.stream.side_effect = client._anthropic.APITimeoutError("timeout")
+        client._client.messages.stream.side_effect = client._anthropic.APITimeoutError(
+            "timeout"
+        )
         with pytest.raises(ProviderError) as exc:
             client.complete(system="sys", user="hi")
         assert exc.value.retryable is True
@@ -188,6 +230,7 @@ class TestAnthropicClient:
 # ---------------------------------------------------------------------------
 # OpenAIClient
 # ---------------------------------------------------------------------------
+
 
 class TestOpenAIClient:
     def test_successful_completion(self):
@@ -226,6 +269,7 @@ class TestOpenAIClient:
 # GeminiClient
 # ---------------------------------------------------------------------------
 
+
 class TestGeminiClient:
     def test_successful_completion(self):
         client = _gemini_client()
@@ -233,7 +277,9 @@ class TestGeminiClient:
         mock_response.text = "gemini says hi"
         mock_response.usage_metadata.prompt_token_count = 30
         mock_response.usage_metadata.candidates_token_count = 15
-        client._genai.GenerativeModel.return_value.generate_content.return_value = mock_response
+        client._genai.GenerativeModel.return_value.generate_content.return_value = (
+            mock_response
+        )
 
         result = client.complete(system="sys", user="hi")
         assert result.text == "gemini says hi"
@@ -241,7 +287,9 @@ class TestGeminiClient:
 
     def test_raises_provider_error_on_sdk_exception(self):
         client = _gemini_client()
-        client._genai.GenerativeModel.return_value.generate_content.side_effect = Exception("api error")
+        client._genai.GenerativeModel.return_value.generate_content.side_effect = (
+            Exception("api error")
+        )
         with pytest.raises(ProviderError) as exc:
             client.complete(system="sys", user="hi")
         assert exc.value.retryable is True
@@ -251,7 +299,9 @@ class TestGeminiClient:
         mock_response = MagicMock()
         mock_response.text = "hello"
         mock_response.usage_metadata = None
-        client._genai.GenerativeModel.return_value.generate_content.return_value = mock_response
+        client._genai.GenerativeModel.return_value.generate_content.return_value = (
+            mock_response
+        )
 
         result = client.complete(system="sys", user="hi")
         assert result.input_tokens == 0
@@ -261,6 +311,7 @@ class TestGeminiClient:
 # ---------------------------------------------------------------------------
 # OllamaClient
 # ---------------------------------------------------------------------------
+
 
 class TestOllamaClient:
     def test_successful_completion(self):
@@ -298,6 +349,7 @@ class TestOllamaClient:
 # ---------------------------------------------------------------------------
 # get_ai_client factory
 # ---------------------------------------------------------------------------
+
 
 class TestGetAiClient:
     def test_returns_anthropic_client(self):

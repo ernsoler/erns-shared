@@ -1,5 +1,4 @@
 import asyncio
-import pytest
 from starlette.responses import StreamingResponse
 
 from erns_shared.http import SSEEvent, sse_stream
