@@ -7,13 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-30
+
 ### Added
-- `aws.s3`: `S3Client` — upload, download, delete, `key_exists`, `list_keys`, presigned GET/PUT URLs
-- `aws.dynamodb`: `DynamoDBTable` — single-table query helpers (`query_by_pk`, `query_by_pk_sk_prefix`, `batch_get`, `put_item`, `delete_item`)
-- `aws.ssm`: `SSMClient` — SSM Parameter Store with in-process cache (`get_parameter`, `get_parameters_by_path`, `put_parameter`, `invalidate_cache`)
-- `aws.powertools`: re-exports `Logger`, `Tracer`, `Metrics`, `MetricUnit`, `LambdaContext` from `aws-lambda-powertools`; `build_powertools()` factory for consistent Lambda setup
-- Added `aws-lambda-powertools>=2.0` runtime dependency
-- Added `moto[s3,dynamodb,ssm]>=5.0` dev dependency
+- `ai.client`: `AIClient` abstract base + concrete implementations for Anthropic, OpenAI, Google Gemini, and Ollama
+- `ai.client`: `AIResponse` dataclass with `estimated_cost_usd` property and `MODEL_COSTS` table
+- `ai.client`: `ProviderError` — provider-agnostic exception with `status_code`, `retryable`, and `public_message`
+- `ai.client`: `get_ai_client()` factory — selects provider by name, falls back to env vars for API keys
+- `http.sse`: `SSEEvent` dataclass — formats Server-Sent Events with auto JSON serialization for dicts/lists
+- `http.sse`: `sse_stream()` — wraps an async generator of `SSEEvent` into a FastAPI/Starlette `StreamingResponse`
+- `ai.client`: `AIClient.stream()` — abstract async generator that yields text chunks; implemented for Anthropic, OpenAI, Ollama, and Gemini (via thread). Feeds directly into `sse_stream()`
+- Optional dependency extras: `ai-anthropic`, `ai-openai`, `ai-google`, `ai-ollama`, `ai` (all providers), `http`
+- `aws.lambda_logger`: `get_lambda_logger()` — structured JSON logger; level controlled via `LOG_LEVEL` env var
 
 ## [0.1.0] - 2026-04-24
 
