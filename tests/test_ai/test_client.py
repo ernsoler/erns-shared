@@ -1,6 +1,7 @@
 import sys
+import asyncio
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from erns_shared.ai.client import (
     AIResponse,
@@ -386,3 +387,82 @@ class TestGetAiClient:
         with patch.dict(sys.modules, {"anthropic": mock_sdk}):
             client = get_ai_client("anthropic", "claude-sonnet-4-6")
         assert isinstance(client, AnthropicClient)
+
+
+# ---------------------------------------------------------------------------
+# stream() — async generator
+# ---------------------------------------------------------------------------
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+async def _collect(gen):
+    chunks = []
+    async for chunk in gen:
+        chunks.append(chunk)
+    return chunks
+
+
+class TestAnthropicStream:
+    def test_yields_text_chunks(self):
+        client = _anthropic_client()
+
+        async def fake_text_stream():
+            for chunk in ["hello", " ", "world"]:
+                yield chunk
+
+        mock_stream = MagicMock()
+        mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+        mock_stream.__aexit__ = AsyncMock(return_value=False)
+        mock_stream.text_stream = fake_text_stream()
+        client._async_client.messages.stream.return_value = mock_stream
+
+        chunks = _run(_collect(client.stream(system="sys", user="hi")))
+        assert chunks == ["hello", " ", "world"]
+
+    def test_raises_provider_error_on_failure(self):
+        client = _anthropic_client()
+        client._async_client.messages.stream.side_effect = Exception("stream error")
+
+        async def _run_stream():
+            async for _ in client.stream(system="sys", user="hi"):
+                pass
+
+        with pytest.raises(ProviderError):
+            _run(_run_stream())
+
+
+class TestOllamaStream:
+    def test_yields_chunks_from_ndjson(self):
+        client = _ollama_client()
+        import json
+
+        lines = [
+            json.dumps({"message": {"content": "hello"}, "done": False}),
+            json.dumps({"message": {"content": " world"}, "done": False}),
+            json.dumps({"message": {"content": ""}, "done": True}),
+        ]
+
+        async def fake_aiter_lines():
+            for line in lines:
+                yield line
+
+        mock_response = MagicMock()
+        mock_response.aiter_lines = fake_aiter_lines
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_client = MagicMock()
+        mock_client.stream.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_httpx = MagicMock()
+        mock_httpx.AsyncClient.return_value = mock_client
+
+        with patch.dict(sys.modules, {"httpx": mock_httpx}):
+            chunks = _run(_collect(client.stream(system="sys", user="hi")))
+
+        assert chunks == ["hello", " world"]

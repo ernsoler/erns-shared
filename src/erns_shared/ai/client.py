@@ -23,7 +23,7 @@ import os
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,33 @@ class AIClient(ABC):
             AIResponse with text, token counts, model, and provider.
         """
 
+    @abstractmethod
+    async def stream(
+        self, system: str, user: str, max_tokens: int = 4096
+    ) -> AsyncGenerator[str, None]:
+        """Stream a completion, yielding text chunks as they arrive.
+
+        Designed to feed directly into sse_stream() from erns_shared.http::
+
+            async def generate():
+                async for chunk in client.stream(system=..., user=...):
+                    yield SSEEvent(data={"text": chunk}, event="delta")
+                yield SSEEvent(data="[DONE]", event="done")
+
+            return sse_stream(generate())
+
+        Args:
+            system:     System / instruction prompt.
+            user:       User-turn message.
+            max_tokens: Maximum tokens in the response.
+
+        Yields:
+            str — text chunks as they arrive from the provider.
+        """
+        # make this an async generator at the abstract level
+        return
+        yield  # noqa: unreachable
+
 
 # ---------------------------------------------------------------------------
 # Anthropic  (Claude)
@@ -147,9 +174,11 @@ class AnthropicClient(AIClient):
                 "anthropic package is not installed. Run: pip install anthropic"
             ) from exc
         self._anthropic = _anthropic
+        self._api_key = api_key
         # 600s timeout — process Lambda has 900s; leaves ~300s headroom for internal
         # backoff retries before the Lambda itself times out.
         self._client = _anthropic.Anthropic(api_key=api_key, timeout=600.0)
+        self._async_client = _anthropic.AsyncAnthropic(api_key=api_key, timeout=600.0)
 
     def complete(self, system: str, user: str, max_tokens: int = 4096) -> AIResponse:
         # Stream so tokens are consumed as they arrive — prevents empty responses
@@ -240,6 +269,26 @@ class AnthropicClient(AIClient):
             provider=self.PROVIDER,
         )
 
+    async def stream(
+        self, system: str, user: str, max_tokens: int = 4096
+    ) -> AsyncGenerator[str, None]:
+        try:
+            async with self._async_client.messages.stream(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            ) as s:
+                async for text in s.text_stream:
+                    yield text
+        except Exception as e:
+            logger.error("Anthropic stream error: %s", e)
+            raise ProviderError(
+                "AI service is temporarily unavailable. Please try again.",
+                status_code=503,
+                retryable=True,
+            ) from e
+
 
 # ---------------------------------------------------------------------------
 # OpenAI  (GPT-4o, etc.)
@@ -265,6 +314,7 @@ class OpenAIClient(AIClient):
             raise ImportError(
                 "openai package is not installed. Run: pip install openai"
             ) from exc
+        self._api_key = api_key
         self._client = OpenAI(api_key=api_key)
         self._errors = (
             AuthenticationError,
@@ -306,6 +356,32 @@ class OpenAIClient(AIClient):
             model=self.model,
             provider=self.PROVIDER,
         )
+
+    async def stream(
+        self, system: str, user: str, max_tokens: int = 4096
+    ) -> AsyncGenerator[str, None]:
+        try:
+            from openai import AsyncOpenAI  # noqa: PLC0415
+
+            async_client = AsyncOpenAI(api_key=self._api_key)
+            async with async_client.chat.completions.stream(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            ) as s:
+                async for text in s.text_stream:
+                    if text:
+                        yield text
+        except Exception as e:
+            logger.error("OpenAI stream error: %s", e)
+            raise ProviderError(
+                "AI service is temporarily unavailable. Please try again.",
+                status_code=503,
+                retryable=True,
+            ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +445,15 @@ class GeminiClient(AIClient):
             provider=self.PROVIDER,
         )
 
+    async def stream(
+        self, system: str, user: str, max_tokens: int = 4096
+    ) -> AsyncGenerator[str, None]:
+        # google-generativeai sync SDK — run in thread, yield full text as one chunk
+        import asyncio
+
+        response = await asyncio.to_thread(self.complete, system, user, max_tokens)
+        yield response.text
+
 
 # ---------------------------------------------------------------------------
 # Ollama  (local HTTP API)
@@ -431,6 +516,42 @@ class OllamaClient(AIClient):
             model=self.model,
             provider=self.PROVIDER,
         )
+
+    async def stream(
+        self, system: str, user: str, max_tokens: int = 4096
+    ) -> AsyncGenerator[str, None]:
+        import json
+        import httpx  # noqa: PLC0415
+
+        payload = {
+            "model": self.model,
+            "stream": True,
+            "options": {"num_predict": max_tokens},
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                async with client.stream(
+                    "POST", f"{self._base_url}/api/chat", json=payload
+                ) as response:
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        data = json.loads(line)
+                        if content := data.get("message", {}).get("content"):
+                            yield content
+                        if data.get("done"):
+                            break
+        except Exception as e:
+            logger.error("Ollama stream error: %s", e)
+            raise ProviderError(
+                "Local AI service is unavailable. Make sure Ollama is running.",
+                status_code=503,
+                retryable=True,
+            ) from e
 
 
 # ---------------------------------------------------------------------------
