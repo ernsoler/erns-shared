@@ -15,6 +15,11 @@ dependencies = [
 
 [project.optional-dependencies]
 http = ["starlette>=0.27"]
+ai-anthropic = ["anthropic>=0.25"]
+ai-openai = ["openai>=1.0"]
+ai-google = ["google-generativeai>=0.5"]
+ai-ollama = ["httpx>=0.27"]
+ai = ["anthropic>=0.25", "openai>=1.0", "google-generativeai>=0.5", "httpx>=0.27"]
 
 [dependency-groups]
 dev = [
