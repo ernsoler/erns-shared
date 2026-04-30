@@ -12,15 +12,31 @@ uv add erns-shared
 pip install erns-shared
 ```
 
+### Optional extras
+
+```bash
+# SSE streaming for FastAPI
+uv add erns-shared[http]
+
+# AI providers — pick what you need
+uv add erns-shared[ai-anthropic]
+uv add erns-shared[ai-openai]
+uv add erns-shared[ai-google]
+uv add erns-shared[ai-ollama]
+
+# All AI providers at once
+uv add erns-shared[ai]
+```
+
 ## Modules
 
-| Module                | Status         | Description                                                        |
-| --------------------- | -------------- | ------------------------------------------------------------------ |
-| `erns_shared.ddd`     | ✅ Available   | DDD primitives, DynamoDB UoW, EventBridge publisher                |
-| `erns_shared.aws`     | ✅ Available   | S3, DynamoDB query helpers, SSM Parameter Store, Lambda Powertools |
-| `erns_shared.ai`      | 🔲 Coming soon | Claude client with retry and cost logging                          |
-| `erns_shared.parsers` | 🔲 Coming soon | PDF extraction, CSV parsing                                        |
-| `erns_shared.http`    | 🔲 Coming soon | API Gateway response builders                                      |
+| Module                | Status       | Description                                                        |
+| --------------------- | ------------ | ------------------------------------------------------------------ |
+| `erns_shared.ddd`     | Available    | DDD primitives, DynamoDB UoW, EventBridge publisher                |
+| `erns_shared.aws`     | Available    | S3, DynamoDB query helpers, SSM Parameter Store, Lambda Powertools |
+| `erns_shared.ai`      | Available    | Multi-provider AI client with cost tracking and error handling      |
+| `erns_shared.http`    | Available    | SSE streaming response for FastAPI                                 |
+| `erns_shared.parsers` | Coming soon  | PDF extraction, CSV parsing                                        |
 
 ---
 
@@ -75,11 +91,13 @@ with uow.transaction():
 ### Structured Lambda logger
 
 ```python
-from erns_shared.ddd import get_lambda_logger
+from erns_shared.aws import get_lambda_logger
 
 logger = get_lambda_logger()
 logger.info("Order placed")
 ```
+
+Set `LOG_LEVEL=DEBUG` env var to enable debug logging.
 
 ---
 
@@ -195,9 +213,65 @@ def handler(event: dict, context: LambdaContext) -> dict:
 
 ---
 
+## `erns_shared.ai`
+
+Multi-provider AI client with a unified interface, cost tracking, and provider-agnostic error handling.
+
+Requires: `uv add erns-shared[ai-anthropic]` (or whichever provider you use).
+
+```python
+from erns_shared.ai import get_ai_client, ProviderError
+
+client = get_ai_client(provider="anthropic", model="claude-sonnet-4-6")
+# API key falls back to ANTHROPIC_API_KEY env var if not passed explicitly
+
+try:
+    response = client.complete(
+        system="You are a helpful assistant.",
+        user="Summarise this document in 3 bullet points.",
+        max_tokens=1024,
+    )
+    print(response.text)
+    print(f"Tokens: {response.input_tokens} in / {response.output_tokens} out")
+    print(f"Cost: ${response.estimated_cost_usd:.6f}")
+except ProviderError as e:
+    # e.status_code, e.retryable, e.public_message
+    print(e.public_message)
+```
+
+Supported providers: `anthropic`, `openai`, `google`, `ollama`.
+
+---
+
+## `erns_shared.http`
+
+### SSE streaming for FastAPI
+
+Requires: `uv add erns-shared[http]`.
+
+```python
+from fastapi import FastAPI
+from erns_shared.http import SSEEvent, sse_stream
+
+app = FastAPI()
+
+@app.post("/chat")
+async def chat(prompt: str):
+    async def generate():
+        async for chunk in some_ai_stream(prompt):
+            yield SSEEvent(data={"text": chunk}, event="delta")
+        yield SSEEvent(data="[DONE]", event="done")
+
+    return sse_stream(generate())
+```
+
+`SSEEvent` fields: `data` (auto-serialized to JSON for dicts/lists), `event`, `id`, `retry`.
+
+---
+
 ## Requirements
 
-- Python 3.14+
+- Python 3.11+
 - `pydantic >= 2.0`
 - `pydantic-settings >= 2.0`
 - `boto3 >= 1.34`
