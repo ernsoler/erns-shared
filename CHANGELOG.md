@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ai.client`: `get_ai_client()` factory — selects provider by name, falls back to env vars for API keys
 - `http.sse`: `SSEEvent` dataclass — formats Server-Sent Events with auto JSON serialization for dicts/lists
 - `http.sse`: `sse_stream()` — wraps an async generator of `SSEEvent` into a FastAPI/Starlette `StreamingResponse`
+- `ai.client`: `AIClient.stream()` — abstract async generator that yields text chunks; implemented for Anthropic, OpenAI, Ollama, and Gemini (via thread). Feeds directly into `sse_stream()`
 - Optional dependency extras: `ai-anthropic`, `ai-openai`, `ai-google`, `ai-ollama`, `ai` (all providers), `http`
 - `aws.lambda_logger`: `get_lambda_logger()` — structured JSON logger; level controlled via `LOG_LEVEL` env var
 

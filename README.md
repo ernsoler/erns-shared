@@ -219,6 +219,8 @@ Multi-provider AI client with a unified interface, cost tracking, and provider-a
 
 Requires: `uv add erns-shared[ai-anthropic]` (or whichever provider you use).
 
+### One-shot completion
+
 ```python
 from erns_shared.ai import get_ai_client, ProviderError
 
@@ -237,6 +239,28 @@ try:
 except ProviderError as e:
     # e.status_code, e.retryable, e.public_message
     print(e.public_message)
+```
+
+### Streaming (SSE)
+
+`stream()` is an async generator that yields text chunks as they arrive — designed to feed directly into `sse_stream()`:
+
+```python
+from erns_shared.ai import get_ai_client
+from erns_shared.http import SSEEvent, sse_stream
+from fastapi import FastAPI
+
+app = FastAPI()
+client = get_ai_client(provider="anthropic", model="claude-sonnet-4-6")
+
+@app.post("/chat")
+async def chat(prompt: str):
+    async def generate():
+        async for chunk in client.stream(system="You are helpful.", user=prompt):
+            yield SSEEvent(data={"text": chunk}, event="delta")
+        yield SSEEvent(data="[DONE]", event="done")
+
+    return sse_stream(generate())
 ```
 
 Supported providers: `anthropic`, `openai`, `google`, `ollama`.
