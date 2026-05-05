@@ -1,13 +1,14 @@
 import contextlib
 from dataclasses import dataclass, field
 import boto3
+import pydantic
 from boto3.dynamodb.conditions import (
     ConditionBase,
     ConditionExpressionBuilder,
     Key as DynamoKey,
 )
 from boto3.dynamodb.types import TypeSerializer
-from typing import Any, Dict, Iterator, List, Literal, Optional
+from typing import Any, Dict, Iterator, List, Literal, Optional, Type, TypeVar
 
 from erns_shared.ddd.base_types import split_list
 
@@ -16,12 +17,49 @@ _BATCH_GET_LIMIT = 100
 _TRANSACTION_LIMIT = 100
 
 
+class DynamoDbId(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+    pk: str
+    sk: Optional[str] = None
+
+
+class DynamoDbRecord(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="ignore")
+    id: DynamoDbId
+
+
+_R = TypeVar("_R", bound=DynamoDbRecord)
+
+
 class DynamoDBTable:
     """High-level single-table query helpers. Complements the DDD persistence layer."""
 
-    def __init__(self, table_name: str) -> None:
+    def __init__(
+        self,
+        table_name: str,
+        pk_name: str = "pk",
+        sk_name: str = "sk",
+    ) -> None:
         self._table_name = table_name
+        self._pk_name = pk_name
+        self._sk_name = sk_name
         self._table = boto3.resource("dynamodb").Table(table_name)
+
+    def _get_key(self, id: DynamoDbId) -> Dict[str, str]:
+        key: Dict[str, str] = {self._pk_name: id.pk}
+        if id.sk is not None:
+            key[self._sk_name] = id.sk
+        return key
+
+    def _serialize(self, record: DynamoDbRecord) -> Dict[str, Any]:
+        from decimal import Decimal
+
+        data = record.model_dump()
+        data.update(self._get_key(record.id))
+        return {k: float(v) if isinstance(v, Decimal) else v for k, v in data.items()}
+
+    def _deserialize(self, item: Dict[str, Any], record_type: Type[_R]) -> _R:
+        return record_type.model_validate(item)
 
     # ---- queries -----------------------------------------------------------
 
@@ -105,12 +143,15 @@ class DynamoDBTable:
 
     def put_item(
         self,
-        item: Dict[str, Any],
+        record: DynamoDbRecord,
         condition: Optional[ConditionBase] = None,
         return_values: Literal["NONE", "ALL_OLD"] = "NONE",
     ) -> Optional[Dict[str, Any]]:
-        """Write an item. Returns the previous item when return_values="ALL_OLD"."""
-        kwargs: Dict[str, Any] = {"Item": item, "ReturnValues": return_values}
+        """Write a record. Returns the previous raw item when return_values="ALL_OLD"."""
+        kwargs: Dict[str, Any] = {
+            "Item": self._serialize(record),
+            "ReturnValues": return_values,
+        }
         if condition is not None:
             kwargs["ConditionExpression"] = condition
         response = self._table.put_item(**kwargs)
@@ -125,6 +166,28 @@ class DynamoDBTable:
         if condition is not None:
             kwargs["ConditionExpression"] = condition
         self._table.delete_item(**kwargs)
+
+    def update_item_by_id(
+        self,
+        id: DynamoDbId,
+        updates: Dict[str, Any],
+        condition: Optional[ConditionBase] = None,
+    ) -> None:
+        """Update specific attributes of an item identified by its DynamoDbId."""
+        if not updates:
+            return
+        expr_names = {f"#{k}": k for k in updates}
+        expr_values = {f":{k}": v for k, v in updates.items()}
+        update_expr = "SET " + ", ".join(f"#{k} = :{k}" for k in updates)
+        kwargs: Dict[str, Any] = {
+            "Key": self._get_key(id),
+            "UpdateExpression": update_expr,
+            "ExpressionAttributeNames": expr_names,
+            "ExpressionAttributeValues": expr_values,
+        }
+        if condition is not None:
+            kwargs["ConditionExpression"] = condition
+        self._table.update_item(**kwargs)
 
     def batch_writer(self) -> contextlib.AbstractContextManager["_WriteContext"]:
         """Accumulate puts/deletes and flush via batch_write_item on exit.
@@ -147,7 +210,12 @@ class DynamoDBTable:
     def _writer(
         self, mode: Literal["batch", "transaction"]
     ) -> Iterator["_WriteContext"]:
-        ctx = _WriteContext(table_name=self._table_name, mode=mode)
+        ctx = _WriteContext(
+            table_name=self._table_name,
+            mode=mode,
+            pk_name=self._pk_name,
+            sk_name=self._sk_name,
+        )
         try:
             yield ctx
             ctx._flush()
@@ -172,28 +240,51 @@ class _Op:
 
 
 class _WriteContext:
-    def __init__(self, table_name: str, mode: Literal["batch", "transaction"]) -> None:
+    def __init__(
+        self,
+        table_name: str,
+        mode: Literal["batch", "transaction"],
+        pk_name: str,
+        sk_name: str,
+    ) -> None:
         self._table_name = table_name
         self._mode = mode
+        self._pk_name = pk_name
+        self._sk_name = sk_name
         self._ops: List[_Op] = []
 
-    def put(
-        self, item: Dict[str, Any], condition: Optional[ConditionBase] = None
-    ) -> None:
-        if condition is not None and self._mode == "batch":
-            raise ValueError(
-                "ConditionExpression is not supported in batch mode — use transaction_writer()"
-            )
-        self._ops.append(_Op(kind="put", data=item, condition=condition))
+    def _build_key(self, id: DynamoDbId) -> Dict[str, str]:
+        key: Dict[str, str] = {self._pk_name: id.pk}
+        if id.sk is not None:
+            key[self._sk_name] = id.sk
+        return key
 
-    def delete(
-        self, key: Dict[str, Any], condition: Optional[ConditionBase] = None
+    def _serialize_record(self, record: DynamoDbRecord) -> Dict[str, Any]:
+        from decimal import Decimal
+
+        data = record.model_dump()
+        data.update(self._build_key(record.id))
+        return {k: float(v) if isinstance(v, Decimal) else v for k, v in data.items()}
+
+    def put(
+        self, record: DynamoDbRecord, condition: Optional[ConditionBase] = None
     ) -> None:
         if condition is not None and self._mode == "batch":
             raise ValueError(
                 "ConditionExpression is not supported in batch mode — use transaction_writer()"
             )
-        self._ops.append(_Op(kind="delete", data=key, condition=condition))
+        self._ops.append(
+            _Op(kind="put", data=self._serialize_record(record), condition=condition)
+        )
+
+    def delete(self, id: DynamoDbId, condition: Optional[ConditionBase] = None) -> None:
+        if condition is not None and self._mode == "batch":
+            raise ValueError(
+                "ConditionExpression is not supported in batch mode — use transaction_writer()"
+            )
+        self._ops.append(
+            _Op(kind="delete", data=self._build_key(id), condition=condition)
+        )
 
     def _flush(self) -> None:
         if not self._ops:
