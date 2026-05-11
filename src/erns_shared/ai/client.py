@@ -15,6 +15,18 @@ Usage:
     client = get_ai_client(provider="anthropic", model="claude-sonnet-4-6")
     response = client.complete(system="...", user="...", max_tokens=4096)
     print(response.text, response.input_tokens, response.output_tokens)
+
+Multi-block system prompts (Anthropic cache_control):
+    response = client.complete(
+        system=[
+            {"type": "text", "text": layer1, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": layer2, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": toolkit_chunk},
+        ],
+        user="...",
+    )
+    # AIResponse.cache_creation_tokens and .cache_read_tokens are populated.
+    # Non-Anthropic providers receive the blocks joined as plain text.
 """
 
 from __future__ import annotations
@@ -22,43 +34,60 @@ from __future__ import annotations
 import os
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, Optional, Union
 
 logger = logging.getLogger(__name__)
+
+# system prompt type alias — str or Anthropic-style list of content blocks
+SystemPrompt = Union[str, list]
 
 
 # ---------------------------------------------------------------------------
 # Cost table  (USD per 1 000 000 tokens — update as pricing changes)
 # ---------------------------------------------------------------------------
+
 MODEL_COSTS: dict[str, dict[str, float]] = {
-    # Anthropic
-    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
-    "claude-opus-4-7": {"input": 15.00, "output": 75.00},
+    # Anthropic — includes cache_write (1.25× input) and cache_read (0.1× input)
+    "claude-haiku-4-5-20251001": {"input": 0.80,  "output": 4.00,  "cache_write": 1.00,  "cache_read": 0.08},
+    "claude-sonnet-4-6":         {"input": 3.00,  "output": 15.00, "cache_write": 3.75,  "cache_read": 0.30},
+    "claude-opus-4-7":           {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     # OpenAI
-    "gpt-4o": {"input": 2.50, "output": 10.00},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-    "gpt-4-turbo": {"input": 10.00, "output": 30.00},
-    "o1": {"input": 15.00, "output": 60.00},
+    "gpt-4o":       {"input": 2.50,  "output": 10.00},
+    "gpt-4o-mini":  {"input": 0.15,  "output": 0.60},
+    "gpt-4-turbo":  {"input": 10.00, "output": 30.00},
+    "o1":           {"input": 15.00, "output": 60.00},
     # Google
-    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+    "gemini-1.5-pro":   {"input": 1.25,  "output": 5.00},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
-    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
+    "gemini-2.0-flash": {"input": 0.10,  "output": 0.40},
     # Ollama — local, treat as free
-    "llama3": {"input": 0.00, "output": 0.00},
-    "mistral": {"input": 0.00, "output": 0.00},
-    "llama3.1:8b": {"input": 0.00, "output": 0.00},
-    "llama3.3:70b": {"input": 0.00, "output": 0.00},
-    "phi3": {"input": 0.00, "output": 0.00},
+    "llama3":        {"input": 0.00, "output": 0.00},
+    "mistral":       {"input": 0.00, "output": 0.00},
+    "llama3.1:8b":   {"input": 0.00, "output": 0.00},
+    "llama3.3:70b":  {"input": 0.00, "output": 0.00},
+    "phi3":          {"input": 0.00, "output": 0.00},
 }
 
 
-def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Return estimated USD cost for a completion call."""
+def estimate_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
+    """Return estimated USD cost for a completion call.
+
+    cache_creation_tokens and cache_read_tokens are Anthropic-specific.
+    Non-Anthropic providers leave them at the default of 0.
+    """
     costs = MODEL_COSTS.get(model, {"input": 0.0, "output": 0.0})
-    return (input_tokens / 1_000_000 * costs["input"]) + (
-        output_tokens / 1_000_000 * costs["output"]
+    return (
+        input_tokens           * costs["input"]                        / 1_000_000
+        + output_tokens        * costs["output"]                       / 1_000_000
+        + cache_creation_tokens * costs.get("cache_write", 0.0)        / 1_000_000
+        + cache_read_tokens     * costs.get("cache_read", 0.0)         / 1_000_000
     )
 
 
@@ -74,10 +103,18 @@ class AIResponse:
     output_tokens: int
     model: str
     provider: str
+    cache_creation_tokens: int = field(default=0)
+    cache_read_tokens: int = field(default=0)
 
     @property
     def estimated_cost_usd(self) -> float:
-        return estimate_cost(self.model, self.input_tokens, self.output_tokens)
+        return estimate_cost(
+            self.model,
+            self.input_tokens,
+            self.output_tokens,
+            self.cache_creation_tokens,
+            self.cache_read_tokens,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +141,23 @@ class ProviderError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _flatten_system(system: SystemPrompt) -> str:
+    """Convert a multi-block system list to a plain string for non-Anthropic providers.
+
+    Each block's "text" value is extracted and joined with double newlines.
+    Blocks without a "text" key are skipped.
+    """
+    if isinstance(system, str):
+        return system
+    parts = [block["text"] for block in system if isinstance(block, dict) and "text" in block]
+    return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
 
@@ -115,21 +169,26 @@ class AIClient(ABC):
         self.model = model
 
     @abstractmethod
-    def complete(self, system: str, user: str, max_tokens: int = 4096) -> AIResponse:
+    def complete(
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
+    ) -> AIResponse:
         """Send a completion request and return a normalised AIResponse.
 
         Args:
-            system:     System / instruction prompt.
+            system:     System / instruction prompt. Either a plain string or a list
+                        of Anthropic-style content blocks (with optional cache_control).
+                        Non-Anthropic providers receive the blocks joined as plain text.
             user:       User-turn message.
             max_tokens: Maximum tokens in the response.
 
         Returns:
-            AIResponse with text, token counts, model, and provider.
+            AIResponse with text, token counts, model, provider, and (for Anthropic)
+            cache_creation_tokens / cache_read_tokens.
         """
 
     @abstractmethod
     async def stream(
-        self, system: str, user: str, max_tokens: int = 4096
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
     ) -> AsyncGenerator[str, None]:
         """Stream a completion, yielding text chunks as they arrive.
 
@@ -143,16 +202,15 @@ class AIClient(ABC):
             return sse_stream(generate())
 
         Args:
-            system:     System / instruction prompt.
+            system:     System / instruction prompt (str or content-block list).
             user:       User-turn message.
             max_tokens: Maximum tokens in the response.
 
         Yields:
             str — text chunks as they arrive from the provider.
         """
-        # make this an async generator at the abstract level
         return
-        yield  # noqa: unreachable
+        yield  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +238,9 @@ class AnthropicClient(AIClient):
         self._client = _anthropic.Anthropic(api_key=api_key, timeout=600.0)
         self._async_client = _anthropic.AsyncAnthropic(api_key=api_key, timeout=600.0)
 
-    def complete(self, system: str, user: str, max_tokens: int = 4096) -> AIResponse:
+    def complete(
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
+    ) -> AIResponse:
         # Stream so tokens are consumed as they arrive — prevents empty responses
         # on large outputs where the non-streaming API can drop the connection.
         try:
@@ -237,18 +297,24 @@ class AnthropicClient(AIClient):
                 retryable=True,
             ) from e
 
+        usage = response.usage
         text = response.content[0].text if response.content else ""
+        cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_read_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
+
         logger.info(
-            "Anthropic response stop_reason=%s output_tokens=%d text_len=%d",
+            "Anthropic response stop_reason=%s output_tokens=%d cache_creation=%d cache_read=%d text_len=%d",
             response.stop_reason,
-            response.usage.output_tokens,
+            usage.output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
             len(text),
         )
         if response.stop_reason == "max_tokens":
             logger.error(
                 "Anthropic hit max_tokens limit model=%s output_tokens=%d — response truncated",
                 self.model,
-                response.usage.output_tokens,
+                usage.output_tokens,
             )
             raise ProviderError(
                 "The document is too large to analyse. Please try a shorter document.",
@@ -263,14 +329,16 @@ class AnthropicClient(AIClient):
             )
         return AIResponse(
             text=text,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
             model=self.model,
             provider=self.PROVIDER,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
         )
 
     async def stream(
-        self, system: str, user: str, max_tokens: int = 4096
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
     ) -> AsyncGenerator[str, None]:
         try:
             async with self._async_client.messages.stream(
@@ -303,13 +371,13 @@ class OpenAIClient(AIClient):
     def __init__(self, model: str, api_key: str) -> None:
         super().__init__(model)
         try:
-            from openai import (
+            from openai import (  # noqa: PLC0415
                 OpenAI,
                 AuthenticationError,
                 RateLimitError,
                 APITimeoutError,
                 APIStatusError,
-            )  # noqa: PLC0415
+            )
         except ImportError as exc:
             raise ImportError(
                 "openai package is not installed. Run: pip install openai"
@@ -323,13 +391,15 @@ class OpenAIClient(AIClient):
             APIStatusError,
         )
 
-    def complete(self, system: str, user: str, max_tokens: int = 4096) -> AIResponse:
+    def complete(
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
+    ) -> AIResponse:
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 messages=[
-                    {"role": "system", "content": system},
+                    {"role": "system", "content": _flatten_system(system)},
                     {"role": "user", "content": user},
                 ],
             )
@@ -358,7 +428,7 @@ class OpenAIClient(AIClient):
         )
 
     async def stream(
-        self, system: str, user: str, max_tokens: int = 4096
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
     ) -> AsyncGenerator[str, None]:
         try:
             from openai import AsyncOpenAI  # noqa: PLC0415
@@ -368,7 +438,7 @@ class OpenAIClient(AIClient):
                 model=self.model,
                 max_tokens=max_tokens,
                 messages=[
-                    {"role": "system", "content": system},
+                    {"role": "system", "content": _flatten_system(system)},
                     {"role": "user", "content": user},
                 ],
             ) as s:
@@ -405,11 +475,13 @@ class GeminiClient(AIClient):
         genai.configure(api_key=api_key)
         self._genai = genai
 
-    def complete(self, system: str, user: str, max_tokens: int = 4096) -> AIResponse:
+    def complete(
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
+    ) -> AIResponse:
         try:
             model_instance = self._genai.GenerativeModel(
                 model_name=self.model,
-                system_instruction=system,
+                system_instruction=_flatten_system(system),
                 generation_config=self._genai.GenerationConfig(
                     max_output_tokens=max_tokens
                 ),
@@ -446,7 +518,7 @@ class GeminiClient(AIClient):
         )
 
     async def stream(
-        self, system: str, user: str, max_tokens: int = 4096
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
     ) -> AsyncGenerator[str, None]:
         # google-generativeai sync SDK — run in thread, yield full text as one chunk
         import asyncio
@@ -480,13 +552,15 @@ class OllamaClient(AIClient):
         self._http = httpx.Client(timeout=600.0)
         self._base_url = base_url.rstrip("/")
 
-    def complete(self, system: str, user: str, max_tokens: int = 4096) -> AIResponse:
+    def complete(
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
+    ) -> AIResponse:
         payload = {
             "model": self.model,
             "stream": False,
             "options": {"num_predict": max_tokens},
             "messages": [
-                {"role": "system", "content": system},
+                {"role": "system", "content": _flatten_system(system)},
                 {"role": "user", "content": user},
             ],
         }
@@ -518,7 +592,7 @@ class OllamaClient(AIClient):
         )
 
     async def stream(
-        self, system: str, user: str, max_tokens: int = 4096
+        self, system: SystemPrompt, user: str, max_tokens: int = 4096
     ) -> AsyncGenerator[str, None]:
         import json
         import httpx  # noqa: PLC0415
@@ -528,7 +602,7 @@ class OllamaClient(AIClient):
             "stream": True,
             "options": {"num_predict": max_tokens},
             "messages": [
-                {"role": "system", "content": system},
+                {"role": "system", "content": _flatten_system(system)},
                 {"role": "user", "content": user},
             ],
         }
