@@ -491,8 +491,16 @@ class TestFlattenSystem:
 
     def test_multiple_blocks_joined_with_double_newline(self):
         blocks = [
-            {"type": "text", "text": "L1 content", "cache_control": {"type": "ephemeral"}},
-            {"type": "text", "text": "L2 content", "cache_control": {"type": "ephemeral"}},
+            {
+                "type": "text",
+                "text": "L1 content",
+                "cache_control": {"type": "ephemeral"},
+            },
+            {
+                "type": "text",
+                "text": "L2 content",
+                "cache_control": {"type": "ephemeral"},
+            },
             {"type": "text", "text": "L4 toolkit"},
         ]
         result = _flatten_system(blocks)
@@ -580,7 +588,13 @@ class TestEstimateCostWithCache:
 
 class TestAIResponseCacheFields:
     def test_defaults_to_zero(self):
-        r = AIResponse(text="hi", input_tokens=0, output_tokens=0, model="claude-sonnet-4-6", provider="anthropic")
+        r = AIResponse(
+            text="hi",
+            input_tokens=0,
+            output_tokens=0,
+            model="claude-sonnet-4-6",
+            provider="anthropic",
+        )
         assert r.cache_creation_tokens == 0
         assert r.cache_read_tokens == 0
 
@@ -683,5 +697,7 @@ class TestNonAnthropicListSystem:
         client.complete(system=system_blocks, user="hi")
 
         call_kwargs = client._http.post.call_args.kwargs
-        system_msg = next(m for m in call_kwargs["json"]["messages"] if m["role"] == "system")
+        system_msg = next(
+            m for m in call_kwargs["json"]["messages"] if m["role"] == "system"
+        )
         assert system_msg["content"] == "instruction"

@@ -49,24 +49,39 @@ SystemPrompt = Union[str, list]
 
 MODEL_COSTS: dict[str, dict[str, float]] = {
     # Anthropic — includes cache_write (1.25× input) and cache_read (0.1× input)
-    "claude-haiku-4-5-20251001": {"input": 0.80,  "output": 4.00,  "cache_write": 1.00,  "cache_read": 0.08},
-    "claude-sonnet-4-6":         {"input": 3.00,  "output": 15.00, "cache_write": 3.75,  "cache_read": 0.30},
-    "claude-opus-4-7":           {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-haiku-4-5-20251001": {
+        "input": 0.80,
+        "output": 4.00,
+        "cache_write": 1.00,
+        "cache_read": 0.08,
+    },
+    "claude-sonnet-4-6": {
+        "input": 3.00,
+        "output": 15.00,
+        "cache_write": 3.75,
+        "cache_read": 0.30,
+    },
+    "claude-opus-4-7": {
+        "input": 15.00,
+        "output": 75.00,
+        "cache_write": 18.75,
+        "cache_read": 1.50,
+    },
     # OpenAI
-    "gpt-4o":       {"input": 2.50,  "output": 10.00},
-    "gpt-4o-mini":  {"input": 0.15,  "output": 0.60},
-    "gpt-4-turbo":  {"input": 10.00, "output": 30.00},
-    "o1":           {"input": 15.00, "output": 60.00},
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4-turbo": {"input": 10.00, "output": 30.00},
+    "o1": {"input": 15.00, "output": 60.00},
     # Google
-    "gemini-1.5-pro":   {"input": 1.25,  "output": 5.00},
+    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
-    "gemini-2.0-flash": {"input": 0.10,  "output": 0.40},
+    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
     # Ollama — local, treat as free
-    "llama3":        {"input": 0.00, "output": 0.00},
-    "mistral":       {"input": 0.00, "output": 0.00},
-    "llama3.1:8b":   {"input": 0.00, "output": 0.00},
-    "llama3.3:70b":  {"input": 0.00, "output": 0.00},
-    "phi3":          {"input": 0.00, "output": 0.00},
+    "llama3": {"input": 0.00, "output": 0.00},
+    "mistral": {"input": 0.00, "output": 0.00},
+    "llama3.1:8b": {"input": 0.00, "output": 0.00},
+    "llama3.3:70b": {"input": 0.00, "output": 0.00},
+    "phi3": {"input": 0.00, "output": 0.00},
 }
 
 
@@ -84,10 +99,10 @@ def estimate_cost(
     """
     costs = MODEL_COSTS.get(model, {"input": 0.0, "output": 0.0})
     return (
-        input_tokens           * costs["input"]                        / 1_000_000
-        + output_tokens        * costs["output"]                       / 1_000_000
-        + cache_creation_tokens * costs.get("cache_write", 0.0)        / 1_000_000
-        + cache_read_tokens     * costs.get("cache_read", 0.0)         / 1_000_000
+        input_tokens * costs["input"] / 1_000_000
+        + output_tokens * costs["output"] / 1_000_000
+        + cache_creation_tokens * costs.get("cache_write", 0.0) / 1_000_000
+        + cache_read_tokens * costs.get("cache_read", 0.0) / 1_000_000
     )
 
 
@@ -153,7 +168,9 @@ def _flatten_system(system: SystemPrompt) -> str:
     """
     if isinstance(system, str):
         return system
-    parts = [block["text"] for block in system if isinstance(block, dict) and "text" in block]
+    parts = [
+        block["text"] for block in system if isinstance(block, dict) and "text" in block
+    ]
     return "\n\n".join(parts)
 
 
