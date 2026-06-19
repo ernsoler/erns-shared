@@ -1,5 +1,6 @@
 import contextlib
 from dataclasses import dataclass, field
+from decimal import Decimal
 import boto3
 import pydantic
 from boto3.dynamodb.conditions import (
@@ -15,6 +16,17 @@ from erns_shared.ddd.base_types import split_list
 _BATCH_WRITE_LIMIT = 25
 _BATCH_GET_LIMIT = 100
 _TRANSACTION_LIMIT = 100
+
+
+def _floats_to_decimal(value: Any) -> Any:
+    """Recursively convert float values to Decimal (required by DynamoDB serializer)."""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _floats_to_decimal(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_floats_to_decimal(v) for v in value]
+    return value
 
 
 class DynamoDbId(pydantic.BaseModel):
@@ -52,11 +64,9 @@ class DynamoDBTable:
         return key
 
     def _serialize(self, record: DynamoDbRecord) -> Dict[str, Any]:
-        from decimal import Decimal
-
         data = record.model_dump()
         data.update(self._get_key(record.id))
-        return {k: float(v) if isinstance(v, Decimal) else v for k, v in data.items()}
+        return _floats_to_decimal(data)
 
     def _deserialize(self, item: Dict[str, Any], record_type: Type[_R]) -> _R:
         return record_type.model_validate(item)
@@ -260,11 +270,9 @@ class _WriteContext:
         return key
 
     def _serialize_record(self, record: DynamoDbRecord) -> Dict[str, Any]:
-        from decimal import Decimal
-
         data = record.model_dump()
         data.update(self._build_key(record.id))
-        return {k: float(v) if isinstance(v, Decimal) else v for k, v in data.items()}
+        return _floats_to_decimal(data)
 
     def put(
         self, record: DynamoDbRecord, condition: Optional[ConditionBase] = None
