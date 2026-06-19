@@ -2,9 +2,16 @@ import pytest
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
+from decimal import Decimal
 from moto import mock_aws
+from typing import Any, Dict, List
 
-from erns_shared.aws.dynamodb import DynamoDBTable, DynamoDbId, DynamoDbRecord
+from erns_shared.aws.dynamodb import (
+    DynamoDBTable,
+    DynamoDbId,
+    DynamoDbRecord,
+    _floats_to_decimal,
+)
 
 
 class _Item(DynamoDbRecord):
@@ -15,6 +22,12 @@ class _Item(DynamoDbRecord):
 class _Order(DynamoDbRecord):
     total: int
     status: str
+
+
+class _Metric(DynamoDbRecord):
+    value: float
+    nested: Dict[str, Any] = {}
+    tags: List[Any] = []
 
 
 _TABLE = "test-table"
@@ -494,16 +507,25 @@ class TestSerialize:
         item = table._serialize(record)
         assert item["id"] == {"pk": "user#1", "sk": "profile"}
 
-    def test_decimal_converted_to_float(self, table):
-        from decimal import Decimal
-
-        class _Scored(DynamoDbRecord):
-            score: Decimal
-
-        record = _Scored(id=DynamoDbId(pk="u#1", sk="s"), score=Decimal("9.5"))
+    def test_float_converted_to_decimal(self, table):
+        record = _Metric(id=DynamoDbId(pk="u#1", sk="s"), value=9.5)
         item = table._serialize(record)
-        assert item["score"] == 9.5
-        assert isinstance(item["score"], float)
+        assert item["value"] == Decimal("9.5")
+        assert isinstance(item["value"], Decimal)
+
+    def test_nested_float_converted_to_decimal(self, table):
+        record = _Metric(
+            id=DynamoDbId(pk="u#1", sk="s"),
+            value=1.0,
+            nested={"ratio": 0.75, "label": "ok"},
+            tags=[3.14, "hello", 2],
+        )
+        item = table._serialize(record)
+        assert item["nested"]["ratio"] == Decimal("0.75")
+        assert item["nested"]["label"] == "ok"
+        assert item["tags"][0] == Decimal("3.14")
+        assert item["tags"][1] == "hello"
+        assert item["tags"][2] == 2
 
     def test_sk_omitted_when_none(self, table):
         record = _Item(id=DynamoDbId(pk="user#1"), name="Alice")
@@ -585,3 +607,96 @@ class TestUpdateItemById:
                 {"name": "X"},
                 condition=Attr("name").eq("NotAlice"),
             )
+
+
+# ---------------------------------------------------------------------------
+# _floats_to_decimal helper
+# ---------------------------------------------------------------------------
+
+
+class TestFloatsToDecimal:
+    def test_float_becomes_decimal(self):
+        assert _floats_to_decimal(3.14) == Decimal("3.14")
+        assert isinstance(_floats_to_decimal(3.14), Decimal)
+
+    def test_int_passthrough(self):
+        result = _floats_to_decimal(42)
+        assert result == 42
+        assert isinstance(result, int)
+
+    def test_string_passthrough(self):
+        assert _floats_to_decimal("hello") == "hello"
+
+    def test_none_passthrough(self):
+        assert _floats_to_decimal(None) is None
+
+    def test_decimal_passthrough(self):
+        d = Decimal("1.5")
+        assert _floats_to_decimal(d) is d
+
+    def test_flat_dict(self):
+        result = _floats_to_decimal({"x": 1.5, "y": "ok", "z": 2})
+        assert result == {"x": Decimal("1.5"), "y": "ok", "z": 2}
+        assert isinstance(result["x"], Decimal)
+
+    def test_nested_dict(self):
+        result = _floats_to_decimal({"outer": {"inner": 0.5}})
+        assert result["outer"]["inner"] == Decimal("0.5")
+
+    def test_list_with_floats(self):
+        result = _floats_to_decimal([1.1, "a", 2, None])
+        assert result[0] == Decimal("1.1")
+        assert result[1] == "a"
+        assert result[2] == 2
+        assert result[3] is None
+
+    def test_list_inside_dict(self):
+        result = _floats_to_decimal({"scores": [1.0, 2.5, 3]})
+        assert result["scores"] == [Decimal("1.0"), Decimal("2.5"), 3]
+
+    def test_dict_inside_list(self):
+        result = _floats_to_decimal([{"v": 9.9}])
+        assert result[0]["v"] == Decimal("9.9")
+
+    def test_precision_preserved(self):
+        result = _floats_to_decimal(0.1)
+        assert result == Decimal("0.1")
+
+
+# ---------------------------------------------------------------------------
+# Float fields in writers (regression: TypeError from DynamoDB serializer)
+# ---------------------------------------------------------------------------
+
+
+class TestFloatFieldsRoundtrip:
+    def test_put_item_with_float_does_not_raise(self, table):
+        record = _Metric(id=DynamoDbId(pk="metric#1", sk="v"), value=3.14)
+        table.put_item(record)
+        items = list(table.query_by_pk(_PK, "metric#1"))
+        assert len(items) == 1
+        assert items[0]["value"] == Decimal("3.14")
+
+    def test_batch_writer_with_float_does_not_raise(self, table):
+        with table.batch_writer() as w:
+            w.put(_Metric(id=DynamoDbId(pk="metric#2", sk="v"), value=1.5))
+            w.put(_Metric(id=DynamoDbId(pk="metric#3", sk="v"), value=2.5))
+        assert list(table.query_by_pk(_PK, "metric#2"))[0]["value"] == Decimal("1.5")
+        assert list(table.query_by_pk(_PK, "metric#3"))[0]["value"] == Decimal("2.5")
+
+    def test_batch_writer_with_nested_float_does_not_raise(self, table):
+        record = _Metric(
+            id=DynamoDbId(pk="metric#4", sk="v"),
+            value=0.0,
+            nested={"ratio": 0.75},
+            tags=[1.1, 2.2],
+        )
+        with table.batch_writer() as w:
+            w.put(record)
+        item = list(table.query_by_pk(_PK, "metric#4"))[0]
+        assert item["nested"]["ratio"] == Decimal("0.75")
+        assert item["tags"][0] == Decimal("1.1")
+
+    def test_transaction_writer_with_float_does_not_raise(self, table):
+        with table.transaction_writer() as w:
+            w.put(_Metric(id=DynamoDbId(pk="metric#5", sk="v"), value=9.9))
+        assert list(table.query_by_pk(_PK, "metric#5"))[0]["value"] == Decimal("9.9")
